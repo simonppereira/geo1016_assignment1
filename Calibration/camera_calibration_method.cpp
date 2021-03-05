@@ -124,8 +124,8 @@ bool CameraCalibration::calibration(
     std::cout << "P matrix is : \n" << P << std::endl;
 
     //solve for M (the whole projection matrix, i.e., M = K * [R, t]) using SVD decomposition.
-    //   Optional: you can check if your M is correct by applying M on the 3D points. If correct, the projected point
-    //             should be very close to your input images points.
+
+
 
     // now from slide 38 of calibration lession, we know that pM=0
     // where p is known and M is unknown
@@ -138,7 +138,7 @@ bool CameraCalibration::calibration(
     Matrix<double> V(n, n, 0.0);
     svd_decompose(P, U, S, V);
 
-    /*
+    
     //display the decomposed vectors // Now let's check if the SVD result is correct
     std::cout<<"U \n"<< U << std::endl;
     std::cout<<"S \n"<< S << std::endl;
@@ -152,7 +152,7 @@ bool CameraCalibration::calibration(
     std::cout << "S: \n" << S << std::endl;
     // Check 4: according to the definition, A = U * S * V^T
     std::cout << "M - U * S * V^T: \n" << P - U * S * transpose(V) << std::endl;
-    */
+
 
     // We get m by taking the last column of V
     const auto m_col = V.get_column(n - 1);
@@ -160,6 +160,25 @@ bool CameraCalibration::calibration(
     // Reshape vector m to matrix M
     Matrix<double> M(3, 4, m_col.data());
     std::cout << "M " << M << std::endl;
+
+
+    //   Optional: you can check if your M is correct by applying M on the 3D points. If correct, the projected point
+    //             should be very close to your input images points.
+    //ACCURACY CHECK
+    std::cout <<"Doing accuracy check: remaking 2d coords with M:\n";
+
+    for (int i = 0; i < points_2d.size(); i++)
+    {
+        vec3 pt3d = points_3d[i];
+        vec2 pt2d = points_2d[i];
+
+        double crds[]{ pt3d[0], pt3d[1], pt3d[2], 1 };
+        Matrix<double> M_pt3(4, 1, crds);
+        Matrix<double> M_pt2 = M * M_pt3;
+        vec2 pt2_div(M_pt2(0, 0) / M_pt2(2, 0), M_pt2(1, 0) / M_pt2(2, 0));
+        vec2 err = pt2d - pt2_div;
+        std::cout << pt2_div << "\t <<< error: " << err.length() << std::endl;
+    }
 
 
     //from slide 45, we extract the M matrix into A and b
@@ -176,10 +195,11 @@ bool CameraCalibration::calibration(
     // INSTRINSIC: extract intrinsic parameters from M.
 
     //rho
-    double rho = 1/a3.length();
+    double rho = 1.0/a3.length();
 
     // skew = theta
     double theta = acos(-(dot( cross(a1, a3), cross(a2, a3)) / (norm(cross(a1, a3)) * norm(cross(a2, a3))) ) );
+    skew = (float) theta;
     //cx, cy
     cx = pow(rho, 2) * dot(a1, a3);
     cy = pow(rho, 2) * dot(a2, a3);
@@ -191,21 +211,27 @@ bool CameraCalibration::calibration(
     //fy == beta
     double beta = pow(rho,2) * norm(cross(a2,a3)) * sin(theta);;
     fy = float(beta);
-    std::cout<<"Intrinsic parameters "<<cx<<" "<<cy<<" "<<theta<<" "<<fx<<" "<<fy<<std::endl;
+
+    std::cout<<"Intrinsic parameters \n"
+    <<"cx:\t"<<cx<<'\n'
+    <<"cy:\t"<<cy<<" "
+    <<"skew:\t"<<theta<<" "
+    <<"fx:\t"<<fx<<" "
+    <<"fy:\t"<<fy<<std::endl;
 
 
     // extract extrinsic parameters from M.
-    // set up  r1, r2, r3 from A
+    // set up  r1, r2, r3 rows from A
     vec3 r1 = (cross(a2, a3)) / (cross(a2, a3).length());
     vec3 r3 = rho * a3;
     vec3 r2 = cross(r3, r1);
 
-    // Set R output matrix
-    for (int i = 0; i < 3; i++) {
-        R[i, 0] = r1[i];
-        R[i, 1] = r2[i];
-        R[i, 2] = r3[i];
-    }
+    // Set R output matrix rows
+    R = mat3(
+            r1[0], r1[1], r1[2],
+            r2[0], r2[1], r2[2],
+            r3[0], r3[1], r3[2]
+    );
 
     //set K
     Matrix<double> K(3, 3,
@@ -214,87 +240,22 @@ bool CameraCalibration::calibration(
             0,     fy / sin(theta),              cy,
             0,     0,                            1    }.data()
             );
-    //T matrix of translation
-    auto Trans = rho * K * b;
+    // k inv
+    Matrix<double> inv_k(3, 3, 0.0);
+    inverse(K, inv_k);
 
+    //T matrix of translation
+    auto Trans = rho * inv_k * b;
+    for(int i=0; i<3; i++)
+    {
+        t[i] = (float) Trans(i,0);
+    }
 
     //display extrinsic
-    std::cout<< "Extrinsic params: \n"
+    std::cout<< "\nExtrinsic params: \n"
             << "Rotation matrix\n"      << R
-            << "\nTranslation vector \n"<< Trans
-            << "\n";
-    // TODO: uncomment the line below to return true when testing your algorithm and in you final submission.
-    return True;
+            << "\nTranslation vector \n"<< Trans << "\n";
 
-
-
-    // TODO: The following code is just an example showing you SVD decomposition, matrix inversion, and some related.
-    // TODO: Delete the code below (or change "#if 1" in the first line to "#if 0") in you final submission.
-
-#if 0
-    std::cout << "[Liangliang:] Camera calibration requires computing the SVD and inverse of matrices.\n"
-                 "\tIn this assignment, I provide you with a Matrix data structure for storing matrices of arbitrary\n"
-                 "\tsizes (see matrix.h). I also wrote the example code to show you how to:\n"
-                 "\t\t- use the dynamic 1D array data structure 'std::vector' from the standard C++ library;\n"
-                 "\t\t  The points (both 3D and 2D) are stored in such arrays;\n"
-                 "\t\t- use the template matrix class (which can have an arbitrary size);\n"
-                 "\t\t- compute the SVD of a matrix;\n"
-                 "\t\t- compute the inverse of a matrix;\n"
-                 "\t\t- compute the transpose of a matrix.\n"
-                 "\tThe following are just the output of these examples. You should delete ALL unrelated code and\n"
-                 "\tavoid unnecessary output in you final submission.\n\n";
-
-    // This is a 1D array of 'double' values. Alternatively, you can use 'double mat[25]' but you cannot change it
-    // length. With 'std::vector', you can do append/delete/insert elements, and much more. The 'std::vector' can store
-    // not only 'double', but also any other types of objects. In case you may want to learn more about 'std::vector'
-    // check here: https://en.cppreference.com/w/cpp/container/vector
-    std::vector<double> array = {1, 3, 3, 4, 7, 6, 2, 8, 2, 8, 3, 2, 4, 9, 1, 7, 3, 23, 2, 3, 5, 2, 1, 5, 8, 9, 22};
-    array.push_back(5); // append 5 to the array (so the size will increase by 1).
-    array.insert(array.end(), 10, 3);  // append ten 3 (so the size will grow by 10).
-
-    // To access its values
-    for (int i=0; i<array.size(); ++i)
-        std::cout << array[i] << " ";  // use 'array[i]' to access its i-th element.
-    std::cout << std::endl;
-
-    // Define an m-by-n double valued matrix.
-    // Here I use the above array to initialize it. You can also use A(i, j) to initialize/modify/access its elements.
-    const int m = 6, n = 5;
-    Matrix<double> A(m, n, array.data());    // 'array.data()' returns a pointer to the array.
-    std::cout << "M: \n" << A << std::endl;
-
-    Matrix<double> U(m, m, 0.0);   // initialized with 0s
-    Matrix<double> S(m, n, 0.0);   // initialized with 0s
-    Matrix<double> V(n, n, 0.0);   // initialized with 0s
-
-    // Compute the SVD decomposition of A
-    svd_decompose(A, U, S, V);
-
-    // Now let's check if the SVD result is correct
-
-    // Check 1: U is orthogonal, so U * U^T must be identity
-    std::cout << "U*U^T: \n" << U * transpose(U) << std::endl;
-
-    // Check 2: V is orthogonal, so V * V^T must be identity
-    std::cout << "V*V^T: \n" << V * transpose(V) << std::endl;
-
-    // Check 3: S must be a diagonal matrix
-    std::cout << "S: \n" << S << std::endl;
-
-    // Check 4: according to the definition, A = U * S * V^T
-    std::cout << "M - U * S * V^T: \n" << A - U * S * transpose(V) << std::endl;
-
-    // Define a 5 by 5 square matrix and compute its inverse.
-    Matrix<double> B(5, 5, array.data());    // Here I use part of the above array to initialize B
-    // Compute its inverse
-    Matrix<double> invB(5, 5);
-    inverse(B, invB);
-    // Let's check if the inverse is correct
-    std::cout << "B * invB: \n" << B * invB << std::endl;
-
-    return false;
-
-    // TODO: delete the above code in you final submission (which are just examples).
-#endif
+    return true;
 }
 
