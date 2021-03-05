@@ -194,10 +194,37 @@ bool CameraCalibration::calibration(
     std::cout<<"Intrinsic parameters "<<cx<<" "<<cy<<" "<<theta<<" "<<fx<<" "<<fy<<std::endl;
 
 
-    // TODO: extract extrinsic parameters from M.
+    // extract extrinsic parameters from M.
+    // set up  r1, r2, r3 from A
+    vec3 r1 = (cross(a2, a3)) / (cross(a2, a3).length());
+    vec3 r3 = rho * a3;
+    vec3 r2 = cross(r3, r1);
 
+    // Set R output matrix
+    for (int i = 0; i < 3; i++) {
+        R[i, 0] = r1[i];
+        R[i, 1] = r2[i];
+        R[i, 2] = r3[i];
+    }
+
+    //set K
+    Matrix<double> K(3, 3,
+                     std::vector<double> {
+            fx,   -fx * cos(theta)/sin(theta),   cx,
+            0,     fy / sin(theta),              cy,
+            0,     0,                            1    }.data()
+            );
+    //T matrix of translation
+    auto Trans = rho * K * b;
+
+
+    //display extrinsic
+    std::cout<< "Extrinsic params: \n"
+            << "Rotation matrix\n"      << R
+            << "\nTranslation vector \n"<< Trans
+            << "\n";
     // TODO: uncomment the line below to return true when testing your algorithm and in you final submission.
-    //return false;
+    return True;
 
 
 
