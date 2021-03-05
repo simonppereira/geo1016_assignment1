@@ -57,15 +57,142 @@ bool CameraCalibration::calibration(
               << "\t" << __FILE__ << std::endl;
     std::cout << "TODO: After implementing the calibration() function, I will disable all unrelated output ...\n\n";
 
-    // TODO: check if input is valid (e.g., number of correspondences >= 6, sizes of 2D/3D points must match)
+    // check if input is valid (e.g., number of correspondences >= 6, sizes of 2D/3D points must match)
+    if (points_2d.size() <6 || points_3d.size()<6 || points_2d.size() != points_3d.size() )
+    {
+        std::cout<<"Your file has a problem with number of 2d,3d points , invalid file=> :( "<<std::endl;
+        return false;
+    }
+    else std::cout << "VALID input file => :)" << std::endl;
 
-    // TODO: construct the P matrix (so P * m = 0).
+    // construct the P matrix (so P * m = 0).
+    // reference for the matrix: https://www.researchgate.net/post/Camera-Calibration-without-height-component
 
-    // TODO: solve for M (the whole projection matrix, i.e., M = K * [R, t]) using SVD decomposition.
+    std::vector<double> flat_vect;
+
+    int index_pt_2d=0;
+    for (auto &pt:points_3d)
+    {
+        // first row
+        // make homogeneous vector of the 3d coordinate
+        flat_vect.push_back(pt[0]);
+        flat_vect.push_back(pt[1]);
+        flat_vect.push_back(pt[2]);
+        flat_vect.push_back(1);
+
+        //add 4 zeros to the vector
+        flat_vect.insert(flat_vect.end(),4,0);
+
+        // insert the values from 2d points * 3d points
+        for(int iter_ =0; iter_<3; iter_++)
+        {
+            flat_vect.push_back(-(points_2d[index_pt_2d][0])*pt[iter_]);
+        }
+
+        flat_vect.push_back(-(points_2d[index_pt_2d][0])*1);
+
+        //second row of the matrix
+        //add 4 more 0's
+        flat_vect.insert(flat_vect.end(),4,0);
+
+        //add 3d points now
+        for(int iter_=0; iter_<3; iter_++)
+        {
+            flat_vect.push_back(pt[iter_]);
+        }
+
+        // add 1
+        flat_vect.push_back(1);
+
+        // 2nd 2d point * 3d points
+        for(int iter_=0; iter_<3; iter_++)
+        {
+            flat_vect.push_back(-(points_2d[index_pt_2d][1])*pt[iter_]);
+        }
+
+        // second 2d point itself
+        flat_vect.push_back(-(points_2d[index_pt_2d][1])*1);
+
+        // go to next 2d point
+        index_pt_2d++;
+    }
+    // make matrix of size 2dpoints*2 , 12
+    int m = points_2d.size() * 2;
+    int n = 12;
+
+    Matrix<double> P(m, n, flat_vect.data());
+    std::cout << "P matrix is : \n" << P << std::endl;
+
+    //solve for M (the whole projection matrix, i.e., M = K * [R, t]) using SVD decomposition.
     //   Optional: you can check if your M is correct by applying M on the 3D points. If correct, the projected point
     //             should be very close to your input images points.
 
-    // TODO: extract intrinsic parameters from M.
+    // now from slide 38 of calibration lession, we know that pM=0
+    // where p is known and M is unknown
+    // this M is extracted from the last column of the V of U,S,V obbtained from SVD of p, last column being reshaped into a 3*4 matrix
+    // also note that pM = k[R T]
+
+    //SVD decomposition of the above P-matrix
+    Matrix<double> U(m, m, 0.0);
+    Matrix<double> S(m, n, 0.0);
+    Matrix<double> V(n, n, 0.0);
+    svd_decompose(P, U, S, V);
+
+    /*
+    //display the decomposed vectors // Now let's check if the SVD result is correct
+    std::cout<<"U \n"<< U << std::endl;
+    std::cout<<"S \n"<< S << std::endl;
+    std::cout<<"V \n"<< V << std::endl;
+
+    // Check 1: U is orthogonal, so U * U^T must be identity
+    std::cout << "U*U^T: \n" << U * transpose(U) << std::endl;
+    // Check 2: V is orthogonal, so V * V^T must be identity
+    std::cout << "V*V^T: \n" << V * transpose(V) << std::endl;
+    // Check 3: S must be a diagonal matrix
+    std::cout << "S: \n" << S << std::endl;
+    // Check 4: according to the definition, A = U * S * V^T
+    std::cout << "M - U * S * V^T: \n" << P - U * S * transpose(V) << std::endl;
+    */
+
+    // We get m by taking the last column of V
+    const auto m_col = V.get_column(n - 1);
+
+    // Reshape vector m to matrix M
+    Matrix<double> M(3, 4, m_col.data());
+    std::cout << "M " << M << std::endl;
+
+
+    //from slide 45, we extract the M matrix into A and b
+
+    // Define a1, a2, a3
+    vec3 a1(M[0][0], M[0][1], M[0][2]);
+    vec3 a2(M[1][0], M[1][1], M[1][2]);
+    vec3 a3(M[2][0], M[2][1], M[2][2]);
+
+    // Create b vector
+    Matrix<double> b(3, 1,
+                     std::vector<double>{M(0, 3), M(1, 3), M(2, 3)}.data()
+                     );
+    // INSTRINSIC: extract intrinsic parameters from M.
+
+    //rho
+    double rho = 1/a3.length();
+
+    // skew = theta
+    double theta = acos(-(dot( cross(a1, a3), cross(a2, a3)) / (norm(cross(a1, a3)) * norm(cross(a2, a3))) ) );
+    //cx, cy
+    cx = pow(rho, 2) * dot(a1, a3);
+    cy = pow(rho, 2) * dot(a2, a3);
+
+    //fx == alpha
+    double alpha = pow(rho,2) * norm(cross(a1,a3)) * sin(theta);
+    fx = float(alpha);
+
+    //fy == beta
+    double beta = pow(rho,2) * norm(cross(a2,a3)) * sin(theta);;
+    fy = float(beta);
+    std::cout<<"Intrinsic parameters "<<cx<<" "<<cy<<" "<<theta<<" "<<fx<<" "<<fy<<std::endl;
+
 
     // TODO: extract extrinsic parameters from M.
 
@@ -76,7 +203,8 @@ bool CameraCalibration::calibration(
 
     // TODO: The following code is just an example showing you SVD decomposition, matrix inversion, and some related.
     // TODO: Delete the code below (or change "#if 1" in the first line to "#if 0") in you final submission.
-#if 1
+
+#if 0
     std::cout << "[Liangliang:] Camera calibration requires computing the SVD and inverse of matrices.\n"
                  "\tIn this assignment, I provide you with a Matrix data structure for storing matrices of arbitrary\n"
                  "\tsizes (see matrix.h). I also wrote the example code to show you how to:\n"
@@ -138,23 +266,8 @@ bool CameraCalibration::calibration(
     std::cout << "B * invB: \n" << B * invB << std::endl;
 
     return false;
+
     // TODO: delete the above code in you final submission (which are just examples).
 #endif
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
